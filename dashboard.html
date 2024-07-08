@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+    <h2>Mis Deudas</h2>
+    <form id="debtForm">
+        <fieldset>
+            <legend>Registrar Deuda</legend>
+            <div class="form-group">
+                <label for="documentNumber">Número del documento:</label>
+                <input type="text" id="documentNumber" name="documentNumber" required>
+            </div>
+            <div class="form-group">
+                <label for="company">Empresa:</label>
+                <input type="text" id="company" name="company" required>
+            </div>
+            <div class="form-group">
+                <label for="amount">Monto a pagar:</label>
+                <input type="number" id="amount" name="amount" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="dueDate">Fecha de vencimiento:</label>
+                <input type="date" id="dueDate" name="dueDate" required>
+            </div>
+            <div class="form-group">
+                <label for="debtType">Tipo de deuda:</label>
+                <select id="debtType" name="debtType" required>
+                    <option value="factura">Facturas por pagar</option>
+                    <option value="recibo">Recibos de servicios</option>
+                    <option value="impuesto">Impuestos</option>
+                    <option value="prestamo">Cronogramas de pagos de préstamos</option>
+                </select>
+            </div>
+            <div class="form-group" id="installmentsGroup" style="display:none;">
+                <label for="installments">Número de cuotas:</label>
+                <input type="number" id="installments" name="installments" min="1">
+            </div>
+            <button type="submit">Registrar Deuda</button>
+        </fieldset>
+    </form>
+
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="file" name="file" accept=".xlsx, .xls" required>
+        <button type="submit">Subir Archivo</button>
+    </form>
+
+    <div class="debt-list">
+        <h3>Deudas Pendientes</h3>
+        <table id="pendingDebtList" class="debt-table">
+            <thead>
+            <tr>
+                <th>Número</th>
+                <th>Vencimiento</th>
+                <th>Saldo</th>
+                <th>Capital</th>
+                <th>Interés</th>
+                <th>Cuota</th>
+                <th>Tipo</th>
+                <th>Cuotas</th>
+                <th>Acción</th>
+            </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+    <div class="debt-list">
+        <h3>Deudas Pagadas</h3>
+        <table id="paidDebtList" class="debt-table">
+            <thead>
+            <tr>
+                <th>Número</th>
+                <th>Vencimiento</th>
+                <th>Saldo</th>
+                <th>Capital</th>
+                <th>Interés</th>
+                <th>Cuota</th>
+                <th>Tipo</th>
+                <th>Cuotas</th>
+            </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+</div>
+<div id="notification" class="notification hidden">
+    <span id="notificationMessage"></span>
+    <button onclick="hideNotification()">Cerrar</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+<script>
+    const pendingDebtList = document.querySelector('#pendingDebtList tbody');
+    const paidDebtList = document.querySelector('#paidDebtList tbody');
+    const uploadForm = document.getElementById('uploadForm');
+    const debtForm = document.getElementById('debtForm');
+    const debtType = document.getElementById('debtType');
+    const installmentsGroup = document.getElementById('installmentsGroup');
+
+    debtType.addEventListener('change', function() {
+        if (debtType.value === 'prestamo') {
+            installmentsGroup.style.display = 'block';
+        } else {
+            installmentsGroup.style.display = 'none';
+        }
+    });
+
+    // Event listener for manual debt form submission
+    debtForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        const numero = document.getElementById('documentNumber').value;
+        const vencimiento = document.getElementById('dueDate').value;
+        const saldo = parseFloat(document.getElementById('amount').value);
+        const capital = saldo;
+        const interes = 0;
+        const type = debtType.value;
+        const installments = type === 'prestamo' ? parseInt(document.getElementById('installments').value) : 1;
+        const cuota = type === 'prestamo' ? saldo / installments : saldo;
+
+        if (type === 'prestamo') {
+            for (let i = 0; i < installments; i++) {
+                const newVencimiento = new Date(vencimiento);
+                newVencimiento.setMonth(newVencimiento.getMonth() + i);
+
+                const debt = {
+                    numero: `${numero}-${i + 1}`,
+                    vencimiento: newVencimiento.toISOString().split('T')[0],
+                    saldo: cuota,
+                    capital: cuota,
+                    interes: interes,
+                    cuota: cuota,
+                    paid: false,
+                    type: type,
+                    installments: installments,
+                    currentInstallment: i + 1 // Agregar el número de la cuota actual
+                };
+
+                console.log('Debt to be saved:', debt);
+                saveDebt(debt);
+            }
+        } else {
+            const debt = {
+                numero: numero,
+                vencimiento: vencimiento,
+                saldo: saldo,
+                capital: capital,
+                interes: interes,
+                cuota: cuota,
+                paid: false,
+                type: type,
+                installments: installments,
+                currentInstallment: 1 // Solo una cuota en este caso
+            };
+
+            console.log('Debt to be saved:', debt);
+            saveDebt(debt);
+        }
+
+        renderDebts();
+        debtForm.reset();
+    });
+
+    // Event listener for file upload form submission
+    uploadForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        const fileInput = document.getElementById('file');
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet);
+
+            console.log('Rows from Excel:', rows); // Debug: Verificar el contenido de las filas
+
+            rows.forEach(row => {
+                const debt = {
+                    numero: row.NUMERO,
+                    vencimiento: new Date(row.VENCIMIENTO).toISOString().split('T')[0],
+                    saldo: parseFloat(row.SALDO),
+                    capital: parseFloat(row.CAPITAL),
+                    interes: parseFloat(row.INTERES),
+                    cuota: parseFloat(row.CUOTA),
+                    type: row.TIPO.toLowerCase(),
+                    paid: false,
+                    installments: row.TIPO.toLowerCase() === 'prestamo' ? parseInt(row.CUOTAS) : 1,
+                    currentInstallment: row.TIPO.toLowerCase() === 'prestamo' ? parseInt(row.CUOTAS_ACTUALES) : 1
+                };
+                console.log('Debt to be saved:', debt); // Debug: Verificar el contenido de la deuda
+                saveDebt(debt);
+            });
+            renderDebts();
+            alert('Deudas registradas exitosamente');
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    // Save debt to localStorage
+    function saveDebt(debt) {
+        let debts = JSON.parse(localStorage.getItem('debts')) || [];
+        debts.push(debt);
+        localStorage.setItem('debts', JSON.stringify(debts));
+        console.log('Debts saved:', debts);
+    }
+
+    // Get debts from localStorage
+    function getDebts() {
+        let debts = JSON.parse(localStorage.getItem('debts')) || [];
+        console.log('Debts retrieved:', debts);
+        return debts;
+    }
+
+    // Add a debt to the debt list in the UI
+    function addDebtToList(debt, listElement) {
+        const dueDate = new Date(debt.vencimiento);
+        const today = new Date();
+
+        let debtClass = '';
+        if (debt.paid) {
+            debtClass = 'green';
+        } else if (dueDate < today) {
+            debtClass = 'red';
+        } else if ((dueDate - today) / (1000 * 3600 * 24) <= 7) {
+            debtClass = 'yellow';
+        } else {
+            debtClass = 'black';
+        }
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${debt.numero}</td>
+            <td>${dueDate.toLocaleDateString()}</td>
+            <td>S/${debt.saldo.toFixed(2)}</td>
+            <td>S/${debt.capital.toFixed(2)}</td>
+            <td>S/${debt.interes.toFixed(2)}</td>
+            <td>S/${debt.cuota.toFixed(2)}</td>
+            <td>${debt.type}</td>
+            <td>${debt.type === 'prestamo' ? `${debt.currentInstallment} de ${debt.installments}` : 'N/A'}</td>
+            ${!debt.paid ? `<td><button onclick="markAsPaid('${debt.numero}')">Marcar como pagado</button></td>` : ''}
+        `;
+        row.classList.add(debtClass);
+        listElement.appendChild(row);
+    }
+
+    // Mark debt as paid
+    function markAsPaid(numero) {
+        let debts = getDebts();
+        debts = debts.map(debt => {
+            if (debt.numero === numero) {
+                debt.paid = true;
+            }
+            return debt;
+        });
+        localStorage.setItem('debts', JSON.stringify(debts));
+        renderDebts();
+    }
+
+    // Show notification
+    function showNotification(message) {
+        const notification = document.getElementById('notification');
+        const notificationMessage = document.getElementById('notificationMessage');
+        notificationMessage.textContent = message;
+        notification.classList.remove('hidden');
+    }
+
+    // Hide notification
+    function hideNotification() {
+        const notification = document.getElementById('notification');
+        notification.classList.add('hidden');
+    }
+
+    // Render all debts
+    function renderDebts() {
+        pendingDebtList.innerHTML = '';
+        paidDebtList.innerHTML = '';
+        const debts = getDebts();
+        let hasOverdue = false;  // Variable para controlar si hay deudas vencidas
+        const today = new Date();
+
+        debts.forEach(debt => {
+            if (!debt.paid && new Date(debt.vencimiento) < today) {
+                hasOverdue = true;  // Marca que hay al menos una deuda vencida
+            }
+            if (debt.paid) {
+                addDebtToList(debt, paidDebtList);
+            } else {
+                addDebtToList(debt, pendingDebtList);
+            }
+        });
+
+        // Mostrar notificación si hay deudas vencidas
+        if (hasOverdue) {
+            showNotification('Tiene deudas vencidas que necesitan ser pagadas.');
+        }
+    }
+
+    // Initial render of debts
+    document.addEventListener('DOMContentLoaded', renderDebts);
+</script>
+</body>
+</html>
